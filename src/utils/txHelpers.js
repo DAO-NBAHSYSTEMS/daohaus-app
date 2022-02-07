@@ -95,6 +95,7 @@ const getMultiSendFn = () => {
 };
 
 const encodeMulti = encodedTXs => {
+  console.log('encodedTXs', encodedTXs);
   const web3 = new Web3();
   const multiSendFn = getMultiSendFn();
   return web3.eth.abi.encodeFunctionCall(multiSendFn, [
@@ -109,6 +110,64 @@ const collapseToCallData = values =>
     value: tx.minionValue || '0',
     operation: tx.operation || '0',
   }));
+const collapseLegoToCallData = (actions, gatherArgs, data) => {
+  return actions.map((action, index) => {
+    if (action.logTX) {
+      console.log(`ACTION DATA FOR TRANSACTION ${index}`);
+      console.log('action', action);
+      console.log('App State', data);
+    }
+    const actionTarget = gatherArgs({
+      ...data,
+      tx: { ...data.tx, gatherArgs: [action.targetContract] },
+    })[0];
+    if (action.logTX) {
+      console.log('targetContract: ', actionTarget);
+    }
+    const actionArgs = gatherArgs({
+      ...data,
+      tx: { ...data.tx, gatherArgs: action.args },
+    });
+    if (action.logTX) {
+      console.log('args: ', actionArgs);
+    }
+    const actionValue = action.value
+      ? gatherArgs({
+          ...data,
+          tx: { ...data.tx, gatherArgs: [action.value] },
+        })[0]
+      : '0';
+    if (action.logTX) {
+      console.log('value: ', actionValue);
+    }
+    const actionOperation = action.operation
+      ? gatherArgs({
+          ...data,
+          tx: { ...data.tx, gatherArgs: [action.operation] },
+        })[0]
+      : '0';
+    if (action.logTX) {
+      console.log('operation: ', actionOperation);
+    }
+    const abiSnippet = getABIsnippet(
+      { contract: action.abi, fnName: action.fnName },
+      data,
+    );
+
+    if (action.logTX) {
+      console.log('abi: ', action.abi);
+      console.log('fnName: ', action.fnName);
+      console.log('abiSnippet', abiSnippet);
+    }
+
+    return {
+      to: actionTarget,
+      data: safeEncodeHexFunction(abiSnippet, actionArgs || []),
+      value: actionValue,
+      operation: actionOperation,
+    };
+  });
+};
 
 const argBuilderCallback = Object.freeze({
   proposeActionVanilla({ values, formData }) {
@@ -187,6 +246,10 @@ export const handleSearch = (data, arg, shouldThrow) => {
   return searchData(data, path, shouldThrow);
 };
 
+export const encodeMultiAction = ({ data, arg, gatherArgs }) => {
+  return encodeMulti(collapseLegoToCallData(arg.actions, gatherArgs, data));
+};
+
 const gatherArgs = data => {
   const { tx } = data;
   return tx.gatherArgs.map(arg => {
@@ -235,6 +298,9 @@ const gatherArgs = data => {
           tx: { ...tx, gatherArgs: arg.operation },
         }).flatMap(a => a),
       );
+    }
+    if (arg.type === 'encodeMultiAction') {
+      return encodeMultiAction({ data, arg, gatherArgs });
     }
     if (arg.type === 'nestedArgs') {
       return arg.gatherArgs.flatMap(a => {
